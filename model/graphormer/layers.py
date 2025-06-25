@@ -5,6 +5,7 @@ from torch import nn
 from torch_geometric.utils import degree
 
 from model.graphormer.utils import decrease_to_max_value
+import time
 
 
 class CentralityEncoding(nn.Module):
@@ -127,9 +128,13 @@ class GraphormerAttentionHead(nn.Module):
         :param ptr: batch pointer that shows graph indexes in batch of graphs
         :return: torch.Tensor, node embeddings after attention operation
         """
+        time_mask_init = time.time()
+
         batch_mask_neg_inf = torch.full(size=(x.shape[0], x.shape[0]), fill_value=-1e6).to(
             next(self.parameters()).device)
         batch_mask_zeros = torch.zeros(size=(x.shape[0], x.shape[0])).to(next(self.parameters()).device)
+
+        time_mask_init_finish = time.time()
 
         # OPTIMIZE: get rid of slices: rewrite to torch
         if type(ptr) == type(None):
@@ -140,15 +145,29 @@ class GraphormerAttentionHead(nn.Module):
                 batch_mask_neg_inf[ptr[i]:ptr[i + 1], ptr[i]:ptr[i + 1]] = 1
                 batch_mask_zeros[ptr[i]:ptr[i + 1], ptr[i]:ptr[i + 1]] = 1
 
+        time_split_finish = time.time()
+
         query = self.q(x)
         key = self.k(x)
         value = self.v(x)
 
+        time_k_q_v_finish = time.time()
+
         c = self.edge_encoding(x, edge_attr, edge_paths)
         a = self.compute_a(key, query, ptr)
         a = (a + b + c) * batch_mask_neg_inf
+
+        time_attention_finish = time.time()
+
         softmax = torch.softmax(a, dim=-1) * batch_mask_zeros
         x = softmax.mm(value)
+
+        time_softmax_finish = time.time()
+        print(f"Time mask init: {time_mask_init_finish - time_mask_init:.2f}s")
+        print(f"Split time: {time_split_finish - time_mask_init_finish:.2f}s")
+        print(f"Time k q v: {time_k_q_v_finish - time_split_finish:.2f}s")
+        print(f"Time attention: {time_attention_finish - time_k_q_v_finish:.2f}s")
+        print(f"Time softmax: {time_softmax_finish - time_attention_finish:.2f}s")
         return x
 
     def compute_a(self, key, query, ptr=None):
@@ -248,7 +267,14 @@ class GraphormerEncoderLayer(nn.Module):
         :param ptr: batch pointer that shows graph indexes in batch of graphs
         :return: torch.Tensor, node embeddings after Graphormer layer operations
         """
+        start = time.time()
+
         x_prime = self.attention(self.ln_1(x), edge_attr, b, edge_paths, ptr) + x
+
+        middle  = time.time()
         x_new = self.ff(self.ln_2(x_prime)) + x_prime
+        end = time.time()
+
+        print(f"MHA: {middle - start}, FFN: {end - middle}")
 
         return x_new

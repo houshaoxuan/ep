@@ -7,6 +7,9 @@ from torch_geometric.data import Data
 from model.graphormer.functional import shortest_path_distance, batched_shortest_path_distance
 from model.graphormer.layers import GraphormerEncoderLayer, CentralityEncoding, SpatialEncoding
 
+import time
+
+
 
 class Graphormer(nn.Module):
     def __init__(self,
@@ -76,6 +79,8 @@ class Graphormer(nn.Module):
         :param data: input graph of batch of graphs
         :return: torch.Tensor, output node embeddings
         """
+        start_time = time.time()
+
         x = data.x.float()
         edge_index = data.edge_index.long()
         edge_attr = data.edge_attr.float()
@@ -87,15 +92,37 @@ class Graphormer(nn.Module):
             ptr = data.ptr
             node_paths, edge_paths = batched_shortest_path_distance(data)
 
+        linear_transformation_start = time.time()
         x = self.node_in_lin(x)
         edge_attr = self.edge_in_lin(edge_attr)
+        linear_transformation_time = time.time() - linear_transformation_start
 
+        centrality_encoding_start = time.time()
         x = self.centrality_encoding(x, edge_index)
-        b = self.spatial_encoding(x, node_paths)
+        centrality_encoding_time = time.time() - centrality_encoding_start
 
+        spatial_encoding_start = time.time()
+        b = self.spatial_encoding(x, node_paths)
+        spatial_encoding_time = time.time() - spatial_encoding_start
+
+        attention_layers_start = time.time()
         for layer in self.layers:
             x = layer(x, edge_attr, b, edge_paths, ptr)
+        attention_layers_time = time.time() - attention_layers_start
 
+        final_transformation_start = time.time()
         x = self.node_out_lin(x)
+        final_transformation_time = time.time() - final_transformation_start
 
-        return x
+        total_time = time.time() - start_time
+
+        timing_info = {
+            "Linear Transformation Time": linear_transformation_time,
+            "Centrality Encoding Time": centrality_encoding_time,
+            "Spatial Encoding Time": spatial_encoding_time,
+            "Attention Layers Time": attention_layers_time,
+            "Final Transformation Time": final_transformation_time,
+            "Total Forward Pass Time": total_time
+        }
+
+        return x, timing_info

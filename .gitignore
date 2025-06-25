@@ -2,3 +2,4 @@ data/
 dataset/
 esol/
 __pycache__/
+*.json
